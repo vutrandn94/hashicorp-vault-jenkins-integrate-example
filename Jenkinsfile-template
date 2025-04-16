@@ -1,0 +1,54 @@
+pipeline {
+    //agent { node { label 'jenkins-agent-node01' } }
+    agent any
+    environment {
+        IMAGE_NAME = "vutd/all:test-vault-v${BUILD_NUMBER}"
+	VAULT_URL = "http://172.31.42.183:8200"
+    }
+
+   stages {
+        stage('checkout code') {
+            steps {
+                deleteDir()
+                checkout scm
+		sh "ls -la"
+            }
+        }
+        stage('Get Secrets from Vault') {
+            steps {
+		script {
+    			/* withCredentials([[$class: 'VaultTokenCredentialBinding', credentialsId: 'test-ci-policy', vaultAddr: 'http://13.212.59.255:8200']]) {
+        		// values will be masked
+        			sh 'echo TOKEN=$VAULT_TOKEN'
+        			sh 'echo ADDR=$VAULT_ADDR'
+    			} */
+
+    			def configuration = [vaultUrl: env.VAULT_URL, vaultCredentialId: 'test-vault-project', engineVersion: 1]
+    			def secrets = [
+        			[path: 'secret/test-vault-project/docker-cred', engineVersion: 2, secretValues: [
+            				[envVar: 'DOCKER_USER', vaultKey: 'docker_user'],
+            				[envVar: 'DOCKER_PASSWORD', vaultKey: 'docker_password']]]
+        			/* [path: 'secret/another_test', engineVersion: 2, secretValues: [
+            				[vaultKey: 'another_test']]] */
+    				]
+			
+			
+    			withVault([configuration: configuration, vaultSecrets: secrets]) {
+        			sh 'echo "[INFO] Get DOCKER_USER & DOCKER_PASSWORD in Vault and login to registry"'
+				sh 'echo "$DOCKER_PASSWORD" | sudo docker login registry.hub.docker.com -u $DOCKER_USER --password-stdin'
+    			}
+		}
+
+            }
+        }
+        stage('build docker image'){
+            steps{
+                script{
+                  sh "docker build -t ${IMAGE_NAME} ."
+                  sh "docker push ${IMAGE_NAME}"
+                  sh "docker rmi -f ${IMAGE_NAME}"
+                }
+            }
+        }
+   }
+}
